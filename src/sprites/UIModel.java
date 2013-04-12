@@ -1,10 +1,8 @@
 package sprites;
 
-import java.awt.*;
+import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.util.*;
-import java.util.List;
-import java.util.Queue;
 
 import org.apache.log4j.Logger;
 
@@ -18,6 +16,7 @@ public class UIModel {
   private BufferedImage sheet = null;
   private int w, h;
   private List<Sprite> sprites = Lists.newArrayList();
+  private int numRows, numCols;
 
   public void loadSheet(BufferedImage sheet) {
     this.sheet = sheet;
@@ -25,6 +24,34 @@ public class UIModel {
     h = sheet.getHeight();
 
     sprites = createSprites();
+    logger.debug("Loaded " + sprites.size() + " sprites.");
+  }
+
+  public void setRowsCols(int rows, int cols) {
+    numRows = rows;
+    numCols = cols;
+    sprites = parseSprites();
+  }
+
+  private List<Sprite> parseSprites() {
+    List<Sprite> ret = Lists.newArrayList();
+
+    int sw = w / numCols;
+    int sh = h / numRows;
+
+    int y = 0;
+    for (int j = 0; j < numRows; j++) {
+      List<BufferedImage> images = Lists.newArrayList();
+      int x = 0;
+      for (int i = 0; i < numCols; i++) {
+        images.add(sheet.getSubimage(x, y, sw, sh));
+        x += sw;
+      }
+      ret.add(new Sprite(PixelUtils.trim(images)));
+      y += sh;
+    }
+
+    return ret;
   }
 
   public List<Sprite> getSprites() {
@@ -32,25 +59,26 @@ public class UIModel {
   }
 
   private List<Sprite> createSprites() {
-    List<Sprite> ret = Lists.newArrayList();
-
     List<Rectangle> bounds = analyzeBounds();
-
-    Multimap<Integer, Rectangle> yRows = LinkedListMultimap.create();
+    int smallestHeight = Integer.MAX_VALUE;
     for (Rectangle r : bounds) {
-      yRows.put(Math.round(r.y / 5) * 5, r);
+      smallestHeight = Math.min(smallestHeight, r.height);
     }
 
-    for (Integer key : yRows.keySet()) {
-      List<BufferedImage> images = Lists.newArrayList();
-      for (Rectangle r : yRows.get(key)) {
-        int offset = r.y - key;
-        images.add(sheet.getSubimage(r.x, key, r.width, r.height + offset));
+    Map<IntKey, List<Rectangle>> yRows = Maps.newTreeMap();
+    for (Rectangle r : bounds) {
+      IntKey key = new IntKey(r.y, smallestHeight);
+      List<Rectangle> list = yRows.get(key);
+      if (list == null) {
+        yRows.put(key, list = Lists.newArrayList());
       }
-      ret.add(new Sprite(images));
+      list.add(r);
     }
 
-    return ret;
+    numRows = yRows.keySet().size();
+    numCols = (int) Math.ceil(1.0 * bounds.size() / numRows);
+
+    return parseSprites();
   }
 
   private List<Rectangle> analyzeBounds() {
@@ -58,14 +86,18 @@ public class UIModel {
 
     List<Rectangle> objects = Lists.newArrayList();
 
-    for (int i = 0; i < w; i++) {
-      for (int j = 0; j < h; j++) {
+    for (int j = 0; j < h; j++) {
+      for (int i = 0; i < w; i++) {
         int rgb = sheet.getRGB(i, j);
-        if (isBackground(rgb)) {
+        if (PixelUtils.background.apply(rgb)) {
           continue;
         }
-        if (!seen.contains(hash(i, j))) {
-          objects.add(floodfill(i, j, seen));
+        if (!seen.contains(i + j * w)) {
+          Rectangle r = PixelUtils.floodfill(sheet, i, j, seen);
+          if (r.width < 5 || r.height < 5) {
+            continue;
+          }
+          objects.add(r);
         }
       }
     }
@@ -73,46 +105,40 @@ public class UIModel {
     return objects;
   }
 
-  private boolean isBackground(int rgb) {
-    int alpha = (rgb >> 24) & 0xff;
-    return alpha == 0;
-  }
-
-  private Rectangle floodfill(int x, int y, Set<Integer> seen) {
-    int minX = x, maxX = x, minY = y, maxY = y;
-    Rectangle bounds = new Rectangle(0, 0, w, h);
-
-    Queue<Point> q = Lists.newLinkedList();
-    q.add(new Point(x, y));
-
-    while (!q.isEmpty()) {
-      Point p = q.poll();
-      if (!bounds.contains(p) || isBackground(sheet.getRGB(p.x, p.y))) {
-        continue;
-      }
-      if (!seen.add(hash(p.x, p.y))) {
-        continue;
-      }
-      minX = Math.min(minX, p.x);
-      maxX = Math.max(maxX, p.x);
-      minY = Math.min(minY, p.y);
-      maxY = Math.max(maxY, p.y);
-
-      q.add(new Point(p.x + 1, p.y));
-      q.add(new Point(p.x - 1, p.y));
-      q.add(new Point(p.x, p.y + 1));
-      q.add(new Point(p.x, p.y - 1));
-    }
-
-    return new Rectangle(minX, minY, maxX - minX, maxY - minY);
-  }
-
-  private int hash(int x, int y) {
-    return x + y * w;
-  }
-
   public BufferedImage getSheet() {
     return sheet;
+  }
+
+  public int getNumCols() {
+    return numCols;
+  }
+
+  public int getNumRows() {
+    return numRows;
+  }
+
+  private static final class IntKey implements Comparable<IntKey> {
+
+    private final int y;
+    private final int threshold;
+
+    public IntKey(int y, int threshold) {
+      this.y = y;
+      this.threshold = threshold;
+    }
+
+    @Override
+    public int compareTo(IntKey o) {
+      if (Math.abs(y - o.y) < threshold) {
+        return 0;
+      }
+      return y - o.y;
+    }
+
+    @Override
+    public String toString() {
+      return y + "";
+    }
   }
 
 }

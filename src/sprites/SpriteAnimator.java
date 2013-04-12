@@ -1,13 +1,18 @@
 package sprites;
 
-import java.awt.Color;
+import java.awt.*;
 import java.awt.datatransfer.*;
+import java.awt.event.*;
 import java.awt.image.BufferedImage;
+import java.io.File;
 import java.net.URL;
+import java.util.List;
 import java.util.concurrent.*;
 
 import javax.imageio.ImageIO;
 import javax.swing.*;
+
+import net.miginfocom.swing.MigLayout;
 
 import org.apache.log4j.*;
 
@@ -22,6 +27,9 @@ public class SpriteAnimator extends JFrame {
 
   private UIModel model = new UIModel();
   private JPanel contentPanel;
+
+  private final JTextField rowsField = new JTextField(4);
+  private final JTextField colsField = new JTextField(4);
 
   public SpriteAnimator() {
     super("Sprite Animator");
@@ -43,22 +51,37 @@ public class SpriteAnimator extends JFrame {
     });
   }
 
-  private void loadImage(URL url) throws Exception {
+  private void loadImage(URL url) {
+    try {
+      BufferedImage bi = ImageIO.read(url);
+      model.loadSheet(bi);
+
+      rowsField.setText(model.getNumRows() + "");
+      colsField.setText(model.getNumCols() + "");
+
+      reload();
+
+      logger.debug("Done.");
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+  }
+
+  private void reload() {
     contentPanel.removeAll();
-
-    BufferedImage bi = ImageIO.read(url);
-    model.loadSheet(bi);
-
     for (Sprite sprite : model.getSprites()) {
-      add(sprite);
+      contentPanel.add(sprite);
     }
 
     contentPanel.invalidate();
     contentPanel.validate();
+    contentPanel.revalidate();
     contentPanel.repaint();
   }
 
   private JComponent createContent() {
+    JPanel container = new JPanel(new BorderLayout());
+
     contentPanel = new JPanel();
     contentPanel.setBackground(Color.black);
 
@@ -66,30 +89,72 @@ public class SpriteAnimator extends JFrame {
       @Override
       public boolean canImport(JComponent comp, DataFlavor[] transferFlavors) {
         for (DataFlavor flavor : transferFlavors) {
-          if (flavor.getRepresentationClass() == URL.class) {
+          if (flavor.getRepresentationClass() == URL.class
+              || flavor.getHumanPresentableName().equals("application/x-java-file-list")) {
             return true;
           }
         }
         return false;
       }
 
+      @SuppressWarnings("deprecation")
       @Override
       public boolean importData(JComponent comp, Transferable t) {
-        for (DataFlavor flavor : t.getTransferDataFlavors()) {
-          if (flavor.getRepresentationClass() == URL.class) {
-            try {
+        try {
+          for (DataFlavor flavor : t.getTransferDataFlavors()) {
+            if (flavor.getRepresentationClass() == URL.class) {
               URL url = (URL) t.getTransferData(flavor);
               loadImage(url);
-            } catch (Exception e) {
-              throw new RuntimeException(e);
+              return true;
+            } else if (flavor.getHumanPresentableName().equals("application/x-java-file-list")) {
+              File file = (File) ((List) t.getTransferData(flavor)).get(0);
+              loadImage(file.toURL());
+              return true;
             }
           }
+          return false;
+        } catch (Exception e) {
+          e.printStackTrace();
+          return false;
         }
-        return false;
       }
     });
 
-    return contentPanel;
+    container.add(createControlsPanel(), BorderLayout.NORTH);
+    container.add(contentPanel, BorderLayout.CENTER);
+
+    return container;
+  }
+
+  private final Action saveAction = new AbstractAction("Save") {
+    @Override
+    public void actionPerformed(ActionEvent e) {
+      ImageOutput.saveSprites(model.getSprites());
+    }
+  };
+
+  private JComponent createControlsPanel() {
+    JPanel ret = new JPanel(new MigLayout());
+
+    ret.add(new JLabel("Cols:"), "");
+    ret.add(colsField);
+    ret.add(new JLabel("Rows:"), "");
+    ret.add(rowsField);
+    ret.add(new JButton(saveAction), "gapleft 20");
+
+    ActionListener listener = new ActionListener() {
+      @Override
+      public void actionPerformed(ActionEvent e) {
+        model.setRowsCols(Integer.parseInt(rowsField.getText()),
+            Integer.parseInt(colsField.getText()));
+        reload();
+      }
+    };
+
+    rowsField.addActionListener(listener);
+    colsField.addActionListener(listener);
+
+    return ret;
   }
 
   public static void main(String[] args) {
